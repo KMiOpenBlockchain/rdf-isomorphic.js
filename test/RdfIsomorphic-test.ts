@@ -8,6 +8,7 @@ import {
   hashTerm,
   hashTerms, hashValues, hasValue, indexGraph,
   isomorphic,
+  isomorphicToSubgraph,
   isTermGrounded,
   quadToSignature,
   sha1hex,
@@ -21,6 +22,10 @@ const DF = new DataFactory<RDF.BaseQuad>();
 describe('isomorphic', () => {
   loadIsomorphicFiles(__dirname + '/assets/isomorphic/', true);
   loadIsomorphicFiles(__dirname + '/assets/non_isomorphic/', false);
+
+  loadIsomorphicToSubgraphFiles(__dirname + '/assets/isomorphic/', true);
+  loadIsomorphicToSubgraphFiles(__dirname + '/assets/isomorphic_to_subgraph/', true);
+  loadIsomorphicToSubgraphFiles(__dirname + '/assets/non_isomorphic_to_subgraph/', false);
 
   describe('for pathological cases', () => {
     /* These cases are not possible in practise, as RDF does not allow blank predicates. */
@@ -184,6 +189,18 @@ function loadIsomorphicFiles(path: string, expected: boolean) {
       });
   }
 }
+
+function loadIsomorphicToSubgraphFiles(path: string, expected: boolean) {
+  for (const subDir of readdirSync(path)) {
+    it(subDir + (expected ? ' should contain isomorphic-to-subgraph graphs' : ' should contain non-isomorphic-to-subgraph graphs'),
+      async () => {
+        const graphA = await loadGraph(path + subDir + '/' + subDir + '-1.nq');
+        const graphB = await loadGraph(path + subDir + '/' + subDir + '-2.nq');
+        return expect(isomorphicToSubgraph(graphA, graphB)).toBe(expected);
+      });
+  }
+}
+
 
 function loadGraph(file: string): Promise<RDF.Quad[]> {
   return arrayifyStream(createReadStream(file).pipe(new StreamParser({ baseIRI: file })));

@@ -15,14 +15,26 @@ export function isomorphic<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graph
 }
 
 /**
+ * Determines if the first given graph is isomorphic to a subgraph of the second.
+ *
+ * @param {Quad[]} graphA An array of quads, order is not important.
+ * @param {Quad[]} graphB An array of quads, order is not important.
+ * @return {boolean} If the first given graph is isomorphic to a subgraph of the second.
+ */
+export function isomorphicToSubgraph<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): boolean {
+  return !!getInjection(graphA, graphB);
+}
+
+
+/**
  * Calculate a hash of graphA blank nodes to graphB blank nodes.
  * This represents a bijection from graphA's blank nodes to graphB's blank nodes.
  *
  * @param {Quad[]} graphA An array of quads, order is not important.
  * @param {Quad[]} graphB An array of quads, order is not important.
- * @return {IBijection} A hash representing a bijection, or null if none could be found.
+ * @return {IFunction} A hash representing a bijection, or null if none could be found.
  */
-export function getBijection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): IBijection {
+export function getBijection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): IFunction {
   // Check if all (non-blanknode-containing) quads in the two graphs are equal.
   // We do this by creating a hash-based index for both graphs.
   const nonBlankIndexA: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphA));
@@ -47,7 +59,7 @@ export function getBijection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], gra
 
 export function getBijectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
   blankQuadsA: Q[], blankQuadsB: Q[], blankNodesA: RDF.BlankNode[], blankNodesB: RDF.BlankNode[],
-  groundedHashesA?: ITermHash, groundedHashesB?: ITermHash): IBijection {
+  groundedHashesA?: ITermHash, groundedHashesB?: ITermHash): IFunction {
   if (!groundedHashesA) {
     groundedHashesA = {};
   }
@@ -72,7 +84,7 @@ export function getBijectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
   // Map the blank nodes from graph A to the blank nodes of graph B using the created hashes.
   // Grounded hashes will also be equal, but not needed here, we will need them in the next recursion
   // (as we only recurse on grounded nodes).
-  let bijection: IBijection = {};
+  let bijection: IFunction = {};
   for (const blankNodeA of blankNodesA) {
     const blankNodeAString: string = termToString(blankNodeA);
     const blankNodeAHash: string = ungroundedHashesA[blankNodeAString];
@@ -116,6 +128,108 @@ export function getBijectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
 
 }
 
+/**
+ * Calculate a hash of graphA blank nodes to graphB blank nodes.
+ * This represents an injection from graphA's blank nodes to graphB's blank nodes.
+ *
+ * @param {Quad[]} graphA An array of quads, order is not important.
+ * @param {Quad[]} graphB An array of quads, order is not important.
+ * @return {IFunction} A hash representing an injection, or null if none could be found.
+ */
+export function getInjection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): IFunction {
+  // Check if all (non-blanknode-containing) quads in the first graph are in the second.
+  // We do this by creating a hash-based index for both graphs.
+  const nonBlankIndexA: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphA));
+  const nonBlankIndexB: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphB));
+  if (Object.keys(nonBlankIndexA).length > Object.keys(nonBlankIndexB).length) {
+    return null;
+  }
+  for (const key in nonBlankIndexA) {
+    if (nonBlankIndexA[key] !== nonBlankIndexB[key]) {
+      return null;
+    }
+  }
+
+  // Pre-process data that needs to be present in each iteration of getInjectionInner.
+  const blankQuadsA: Q[] = uniqGraph(getQuadsWithBlankNodes(graphA));
+  const blankQuadsB: Q[] = uniqGraph(getQuadsWithBlankNodes(graphB));
+  const blankNodesA: RDF.BlankNode[] = getGraphBlankNodes(graphA);
+  const blankNodesB: RDF.BlankNode[] = getGraphBlankNodes(graphB);
+
+  return getInjectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB);
+}
+
+export function getInjectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
+  blankQuadsA: Q[], blankQuadsB: Q[], blankNodesA: RDF.BlankNode[], blankNodesB: RDF.BlankNode[],
+  groundedHashesA?: ITermHash, groundedHashesB?: ITermHash): IFunction {
+  if (!groundedHashesA) {
+    groundedHashesA = {};
+  }
+  if (!groundedHashesB) {
+    groundedHashesB = {};
+  }
+
+  // Hash every term based on the signature of the quads if appears in.
+  const [hashesA, ungroundedHashesA] = hashTerms(blankQuadsA, blankNodesA, groundedHashesA);
+  const [hashesB, ungroundedHashesB] = hashTerms(blankQuadsB, blankNodesB, groundedHashesB);
+
+  // Break quickly if graph A contains a grounded node that is not contained in the other graph.
+  if (Object.keys(hashesA).length > Object.keys(hashesB).length) {
+    return null;
+  }
+  for (const hashKeyA in hashesA) {
+    if (!hasValue(hashesB, hashesA[hashKeyA])) {
+      return null;
+    }
+  }
+
+  // Map the blank nodes from graph A to the blank nodes of graph B using the created hashes.
+  // Grounded hashes will also be equal, but not needed here, we will need them in the next recursion
+  // (as we only recurse on grounded nodes).
+  let injection: IFunction = {};
+  for (const blankNodeA of blankNodesA) {
+    const blankNodeAString: string = termToString(blankNodeA);
+    const blankNodeAHash: string = ungroundedHashesA[blankNodeAString];
+    for (const blankNodeBString in ungroundedHashesB) {
+      if (ungroundedHashesB[blankNodeBString] === blankNodeAHash) {
+        injection[blankNodeAString] = blankNodeBString;
+        delete ungroundedHashesB[blankNodeBString];
+        break;
+      }
+    }
+  }
+
+  // Check if all nodes from graph A are present in the bijection,
+  // if not, speculatively mark pairs with matching ungrounded hashes as injected, and recurse.
+  if (!arraysEqual(Object.keys(injection).sort(), blankNodesA.map(termToString).sort())
+    || !arraysSubset(hashValues(injection).sort(), blankNodesB.map(termToString).sort())) {
+    // I have not yet been able to find any pathological cases where this code is reached.
+    // This may be removable, but let's wait until someone proves that.
+    injection = null;
+
+    for (const blankNodeA of blankNodesA) {
+      // Only replace ungrounded node hashes
+      const blankNodeAString: string = termToString(blankNodeA);
+      if (!hashesA[blankNodeAString]) {
+        for (const blankNodeB of blankNodesB) {
+          // Only replace ungrounded node hashes
+          const blankNodeBString: string = termToString(blankNodeB);
+          if (!hashesB[blankNodeBString]) {
+            if (ungroundedHashesB[blankNodeBString] === ungroundedHashesA[blankNodeAString]) {
+              const hash: string = sha1hex(blankNodeAString);
+              injection = getInjectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB,
+                { ...hashesA, [blankNodeAString]: hash }, { ...hashesB, [blankNodeBString]: hash });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return injection;
+
+}
+
 function arraysEqual(array1: any[], array2: any[]) {
   if (array1.length !== array2.length) {
     return false;
@@ -126,6 +240,18 @@ function arraysEqual(array1: any[], array2: any[]) {
     }
   }
 
+  return true;
+}
+
+function arraysSubset(array1: any[], array2: any[]) {
+  if (array1.length > array2.length) {
+    return false;
+  }
+  for (let i = array1.length; i--;) {
+    if (!array2.includes(array1[i])) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -371,6 +497,6 @@ export interface ITermHash {
   [term: string]: string;
 }
 
-export interface IBijection {
+export interface IFunction {
   [nodeA: string]: string;
 }
