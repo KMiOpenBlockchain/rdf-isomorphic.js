@@ -1,7 +1,7 @@
-import {createHash} from "crypto";
+import { createHash } from "crypto";
 import * as RDF from "rdf-js";
-import {quadToStringQuad, stringQuadToQuad, termToString} from "rdf-string";
-import {everyTerms, getBlankNodes, getTerms, someTerms, uniqTerms, getTermsNested} from "rdf-terms";
+import { quadToStringQuad, stringQuadToQuad, termToString } from "rdf-string";
+import { everyTerms, getBlankNodes, getTerms, someTerms, uniqTerms, getTermsNested } from "rdf-terms";
 
 /**
  * Determines if the two given graphs are isomorphic.
@@ -11,7 +11,18 @@ import {everyTerms, getBlankNodes, getTerms, someTerms, uniqTerms, getTermsNeste
  * @return {boolean} If the two given graphs are isomorphic.
  */
 export function isomorphic<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): boolean {
-  return !!getBijection(graphA, graphB);
+  const abInjection = getInjection(graphA, graphB);
+  const baInjection = getInjection(graphB, graphA);
+  if ((!!abInjection) && (!!baInjection)) {
+    if (Object.keys(abInjection).every((aKey) => {
+      return baInjection[abInjection[aKey]] === aKey;
+    }) && Object.keys(baInjection).every((bKey) => {
+      return abInjection[baInjection[bKey]] === bKey;
+    })) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -26,107 +37,107 @@ export function isomorphicToSubgraph<Q extends RDF.BaseQuad = RDF.Quad>(graphA: 
 }
 
 
-/**
- * Calculate a hash of graphA blank nodes to graphB blank nodes.
- * This represents a bijection from graphA's blank nodes to graphB's blank nodes.
- *
- * @param {Quad[]} graphA An array of quads, order is not important.
- * @param {Quad[]} graphB An array of quads, order is not important.
- * @return {IFunction} A hash representing a bijection, or null if none could be found.
- */
-export function getBijection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): IFunction {
-  // Check if all (non-blanknode-containing) quads in the two graphs are equal.
-  // We do this by creating a hash-based index for both graphs.
-  const nonBlankIndexA: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphA));
-  const nonBlankIndexB: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphB));
-  if (Object.keys(nonBlankIndexA).length !== Object.keys(nonBlankIndexB).length) {
-    return null;
-  }
-  for (const key in nonBlankIndexA) {
-    if (nonBlankIndexA[key] !== nonBlankIndexB[key]) {
-      return null;
-    }
-  }
+// /**
+//  * Calculate a hash of graphA blank nodes to graphB blank nodes.
+//  * This represents a bijection from graphA's blank nodes to graphB's blank nodes.
+//  *
+//  * @param {Quad[]} graphA An array of quads, order is not important.
+//  * @param {Quad[]} graphB An array of quads, order is not important.
+//  * @return {IFunction} A hash representing a bijection, or null if none could be found.
+//  */
+// export function getBijection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): IFunction {
+//   // Check if all (non-blanknode-containing) quads in the two graphs are equal.
+//   // We do this by creating a hash-based index for both graphs.
+//   const nonBlankIndexA: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphA));
+//   const nonBlankIndexB: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphB));
+//   if (Object.keys(nonBlankIndexA).length !== Object.keys(nonBlankIndexB).length) {
+//     return null;
+//   }
+//   for (const key in nonBlankIndexA) {
+//     if (nonBlankIndexA[key] !== nonBlankIndexB[key]) {
+//       return null;
+//     }
+//   }
 
-  // Pre-process data that needs to be present in each iteration of getBijectionInner.
-  const blankQuadsA: Q[] = uniqGraph(getQuadsWithBlankNodes(graphA));
-  const blankQuadsB: Q[] = uniqGraph(getQuadsWithBlankNodes(graphB));
-  const blankNodesA: RDF.BlankNode[] = getGraphBlankNodes(graphA);
-  const blankNodesB: RDF.BlankNode[] = getGraphBlankNodes(graphB);
+//   // Pre-process data that needs to be present in each iteration of getBijectionInner.
+//   const blankQuadsA: Q[] = uniqGraph(getQuadsWithBlankNodes(graphA));
+//   const blankQuadsB: Q[] = uniqGraph(getQuadsWithBlankNodes(graphB));
+//   const blankNodesA: RDF.BlankNode[] = getGraphBlankNodes(graphA);
+//   const blankNodesB: RDF.BlankNode[] = getGraphBlankNodes(graphB);
 
-  return getBijectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB);
-}
+//   return getBijectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB);
+// }
 
-export function getBijectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
-  blankQuadsA: Q[], blankQuadsB: Q[], blankNodesA: RDF.BlankNode[], blankNodesB: RDF.BlankNode[],
-  groundedHashesA?: ITermHash, groundedHashesB?: ITermHash): IFunction {
-  if (!groundedHashesA) {
-    groundedHashesA = {};
-  }
-  if (!groundedHashesB) {
-    groundedHashesB = {};
-  }
+// export function getBijectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
+//   blankQuadsA: Q[], blankQuadsB: Q[], blankNodesA: RDF.BlankNode[], blankNodesB: RDF.BlankNode[],
+//   groundedHashesA?: ITermHash, groundedHashesB?: ITermHash): IFunction {
+//   if (!groundedHashesA) {
+//     groundedHashesA = {};
+//   }
+//   if (!groundedHashesB) {
+//     groundedHashesB = {};
+//   }
 
-  // Hash every term based on the signature of the quads if appears in.
-  const [hashesA, ungroundedHashesA] = hashTerms(blankQuadsA, blankNodesA, groundedHashesA);
-  const [hashesB, ungroundedHashesB] = hashTerms(blankQuadsB, blankNodesB, groundedHashesB);
+//   // Hash every term based on the signature of the quads if appears in.
+//   const [hashesA, ungroundedHashesA] = hashTerms(blankQuadsA, blankNodesA, groundedHashesA);
+//   const [hashesB, ungroundedHashesB] = hashTerms(blankQuadsB, blankNodesB, groundedHashesB);
 
-  // Break quickly if a graph contains a grounded node that is not contained in the other graph.
-  if (Object.keys(hashesA).length !== Object.keys(hashesB).length) {
-    return null;
-  }
-  for (const hashKeyA in hashesA) {
-    if (!hasValue(hashesB, hashesA[hashKeyA])) {
-      return null;
-    }
-  }
+//   // Break quickly if a graph contains a grounded node that is not contained in the other graph.
+//   if (Object.keys(hashesA).length !== Object.keys(hashesB).length) {
+//     return null;
+//   }
+//   for (const hashKeyA in hashesA) {
+//     if (!hasValue(hashesB, hashesA[hashKeyA])) {
+//       return null;
+//     }
+//   }
 
-  // Map the blank nodes from graph A to the blank nodes of graph B using the created hashes.
-  // Grounded hashes will also be equal, but not needed here, we will need them in the next recursion
-  // (as we only recurse on grounded nodes).
-  let bijection: IFunction = {};
-  for (const blankNodeA of blankNodesA) {
-    const blankNodeAString: string = termToString(blankNodeA);
-    const blankNodeAHash: string = ungroundedHashesA[blankNodeAString];
-    for (const blankNodeBString in ungroundedHashesB) {
-      if (ungroundedHashesB[blankNodeBString] === blankNodeAHash) {
-        bijection[blankNodeAString] = blankNodeBString;
-        delete ungroundedHashesB[blankNodeBString];
-        break;
-      }
-    }
-  }
+//   // Map the blank nodes from graph A to the blank nodes of graph B using the created hashes.
+//   // Grounded hashes will also be equal, but not needed here, we will need them in the next recursion
+//   // (as we only recurse on grounded nodes).
+//   let bijection: IFunction = {};
+//   for (const blankNodeA of blankNodesA) {
+//     const blankNodeAString: string = termToString(blankNodeA);
+//     const blankNodeAHash: string = ungroundedHashesA[blankNodeAString];
+//     for (const blankNodeBString in ungroundedHashesB) {
+//       if (ungroundedHashesB[blankNodeBString] === blankNodeAHash) {
+//         bijection[blankNodeAString] = blankNodeBString;
+//         delete ungroundedHashesB[blankNodeBString];
+//         break;
+//       }
+//     }
+//   }
 
-  // Check if all nodes from graph A and B are present in the bijection,
-  // if not, speculatively mark pairs with matching ungrounded hashes as bijected, and recurse.
-  if (!arraysEqual(Object.keys(bijection).sort(), blankNodesA.map(termToString).sort())
-    || !arraysEqual(hashValues(bijection).sort(), blankNodesB.map(termToString).sort())) {
-    // I have not yet been able to find any pathological cases where this code is reached.
-    // This may be removable, but let's wait until someone proves that.
-    bijection = null;
+//   // Check if all nodes from graph A and B are present in the bijection,
+//   // if not, speculatively mark pairs with matching ungrounded hashes as bijected, and recurse.
+//   if (!arraysEqual(Object.keys(bijection).sort(), blankNodesA.map(termToString).sort())
+//     || !arraysEqual(hashValues(bijection).sort(), blankNodesB.map(termToString).sort())) {
+//     // I have not yet been able to find any pathological cases where this code is reached.
+//     // This may be removable, but let's wait until someone proves that.
+//     bijection = null;
 
-    for (const blankNodeA of blankNodesA) {
-      // Only replace ungrounded node hashes
-      const blankNodeAString: string = termToString(blankNodeA);
-      if (!hashesA[blankNodeAString]) {
-        for (const blankNodeB of blankNodesB) {
-          // Only replace ungrounded node hashes
-          const blankNodeBString: string = termToString(blankNodeB);
-          if (!hashesB[blankNodeBString]) {
-            if (ungroundedHashesA[blankNodeAString] === ungroundedHashesB[blankNodeBString]) {
-              const hash: string = sha1hex(blankNodeAString);
-              bijection = getBijectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB,
-                { ...hashesA, [blankNodeAString]: hash }, { ...hashesB, [blankNodeBString]: hash });
-            }
-          }
-        }
-      }
-    }
-  }
+//     for (const blankNodeA of blankNodesA) {
+//       // Only replace ungrounded node hashes
+//       const blankNodeAString: string = termToString(blankNodeA);
+//       if (!hashesA[blankNodeAString]) {
+//         for (const blankNodeB of blankNodesB) {
+//           // Only replace ungrounded node hashes
+//           const blankNodeBString: string = termToString(blankNodeB);
+//           if (!hashesB[blankNodeBString]) {
+//             if (ungroundedHashesA[blankNodeAString] === ungroundedHashesB[blankNodeBString]) {
+//               const hash: string = sha1hex(blankNodeAString);
+//               bijection = getBijectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB,
+//                 { ...hashesA, [blankNodeAString]: hash }, { ...hashesB, [blankNodeBString]: hash });
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
 
-  return bijection;
+//   return bijection;
 
-}
+// }
 
 /**
  * Calculate a hash of graphA blank nodes to graphB blank nodes.
@@ -139,8 +150,8 @@ export function getBijectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
 export function getInjection<Q extends RDF.BaseQuad = RDF.Quad>(graphA: Q[], graphB: Q[]): IFunction {
   // Check if all (non-blanknode-containing) quads in the first graph are in the second.
   // We do this by creating a hash-based index for both graphs.
-  const nonBlankIndexA: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphA));
-  const nonBlankIndexB: {[quad: string]: boolean} = indexGraph(getQuadsWithoutBlankNodes(graphB));
+  const nonBlankIndexA: { [quad: string]: boolean } = indexGraph(getQuadsWithoutBlankNodes(graphA));
+  const nonBlankIndexB: { [quad: string]: boolean } = indexGraph(getQuadsWithoutBlankNodes(graphB));
   if (Object.keys(nonBlankIndexA).length > Object.keys(nonBlankIndexB).length) {
     return null;
   }
@@ -189,9 +200,9 @@ export function getInjectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
   let injection: IFunction = {};
   for (const blankNodeA of blankNodesA) {
     const blankNodeAString: string = termToString(blankNodeA);
-    const blankNodeAHash: string = ungroundedHashesA[blankNodeAString];
+    const blankNodeAHash: string[] = ungroundedHashesA[blankNodeAString];
     for (const blankNodeBString in ungroundedHashesB) {
-      if (ungroundedHashesB[blankNodeBString] === blankNodeAHash) {
+      if (blankNodeAHash.every((signature) => { return ungroundedHashesB[blankNodeBString].includes(signature) })) {
         injection[blankNodeAString] = blankNodeBString;
         delete ungroundedHashesB[blankNodeBString];
         break;
@@ -215,8 +226,8 @@ export function getInjectionInner<Q extends RDF.BaseQuad = RDF.Quad>(
           // Only replace ungrounded node hashes
           const blankNodeBString: string = termToString(blankNodeB);
           if (!hashesB[blankNodeBString]) {
-            if (ungroundedHashesB[blankNodeBString] === ungroundedHashesA[blankNodeAString]) {
-              const hash: string = sha1hex(blankNodeAString);
+            if (ungroundedHashesA[blankNodeAString].every((signature) => { return ungroundedHashesB[blankNodeBString].includes(signature) })) {
+              const hash: string[] = [blankNodeAString];
               injection = getInjectionInner(blankQuadsA, blankQuadsB, blankNodesA, blankNodesB,
                 { ...hashesA, [blankNodeAString]: hash }, { ...hashesB, [blankNodeBString]: hash });
             }
@@ -271,12 +282,12 @@ export function hashValues(hash: any) {
 /**
  * Check if the given hash contains the given value.
  * @param hash A hash.
- * @param {string} value A value.
+ * @param {string[]} value A value.
  * @return {boolean} If it contains the value.
  */
-export function hasValue(hash: any, value: any) {
+export function hasValue(hash: ITermHash, value: string[]) {
   for (const hashValue in hash) {
-    if (hash[hashValue] === value) {
+    if (value.every((val) => { return hash[hashValue].includes(val) })) {
       return true;
     }
   }
@@ -312,8 +323,8 @@ export function getQuadsWithoutBlankNodes<Q extends RDF.BaseQuad = RDF.Quad>(gra
  * @param {Quad[]} graph An array of quads, the order does not matter.
  * @return {{[p: string]: boolean}} A hash-based datastructure representing the graph.
  */
-export function indexGraph<Q extends RDF.BaseQuad = RDF.Quad>(graph: Q[]): {[quad: string]: boolean} {
-  const index: {[quad: string]: boolean} = {};
+export function indexGraph<Q extends RDF.BaseQuad = RDF.Quad>(graph: Q[]): { [quad: string]: boolean } {
+  const index: { [quad: string]: boolean } = {};
   for (const quad of graph) {
     index[JSON.stringify(quadToStringQuad(quad))] = true;
   }
@@ -325,7 +336,7 @@ export function indexGraph<Q extends RDF.BaseQuad = RDF.Quad>(graph: Q[]): {[qua
  * @param {{[p: string]: boolean}} indexedGraph A hash-based datastructure representing the graph.
  * @return {Quad[]} An array of quads, the order does not matter.
  */
-export function deindexGraph<Q extends RDF.BaseQuad = RDF.Quad>(indexedGraph: {[quad: string]: boolean}): Q[] {
+export function deindexGraph<Q extends RDF.BaseQuad = RDF.Quad>(indexedGraph: { [quad: string]: boolean }): Q[] {
   return Object.keys(indexedGraph).map((str) => stringQuadToQuad(JSON.parse(str)));
 }
 
@@ -360,7 +371,7 @@ export function getGraphBlankNodes<Q extends RDF.BaseQuad = RDF.Quad>(graph: Q[]
  */
 export function hashTerms<Q extends RDF.BaseQuad = RDF.Quad>(quads: Q[], terms: RDF.Term[], groundedHashes: ITermHash):
   [ITermHash, ITermHash] {
-  const hashes: ITermHash = {...groundedHashes};
+  const hashes: ITermHash = { ...groundedHashes };
   const ungroundedHashes: ITermHash = {};
   let hashNeeded: boolean = true;
 
@@ -380,19 +391,23 @@ export function hashTerms<Q extends RDF.BaseQuad = RDF.Quad>(quads: Q[], terms: 
     }
 
     // All terms that have a unique hash at this point can be marked as grounded
-    const uniques: {[term: string]: string | boolean} = {};
+    const uniques: { [term: string]: string | boolean } = {};
+    const uniquesDirectory: { [term: string]: string[] } = {};
     for (const termKey in ungroundedHashes) {
       const hash = ungroundedHashes[termKey];
-      if (uniques[hash] === undefined) {
-        uniques[hash] = termKey;
+      const hashString = hash.join('');
+      uniquesDirectory[hashString] = hash;
+      if (uniques[hashString] === undefined) {
+        uniques[hashString] = termKey;
       } else {
-        uniques[hash] = false;
+        uniques[hashString] = false;
       }
     }
-    for (const hash in uniques) {
-      const value = uniques[hash];
+    for (const hashString in uniques) {
+      const value = uniques[hashString];
       if (value) {
-        hashes[<string> value] = hash;
+        const hash = uniquesDirectory[hashString];
+        hashes[<string>value] = hash;
       }
     }
 
@@ -400,7 +415,7 @@ export function hashTerms<Q extends RDF.BaseQuad = RDF.Quad>(quads: Q[], terms: 
     hashNeeded = initialGroundedNodesCount !== Object.keys(hashes).length;
   }
 
-  return [ hashes, ungroundedHashes ];
+  return [hashes, ungroundedHashes];
 }
 
 /**
@@ -416,10 +431,10 @@ export function hashTerms<Q extends RDF.BaseQuad = RDF.Quad>(quads: Q[], terms: 
  * @param {Term} term The term to get the hash around.
  * @param {Quad[]} quads The quads to include in the hashing.
  * @param {ITermHash} hashes A grounded term hash object.
- * @return {[boolean , string]} A tuple indicating if the given term is grounded in all the given quads, and the hash.
+ * @return {[boolean , Array]} A tuple indicating if the given term is grounded in all the given quads, and the hash.
  */
 export function hashTerm<Q extends RDF.BaseQuad = RDF.Quad>(term: RDF.Term, quads: Q[], hashes: ITermHash):
-  [boolean, string] {
+  [boolean, string[]] {
   const quadSignatures = [];
   let grounded: boolean = true;
   for (const quad of quads) {
@@ -433,8 +448,7 @@ export function hashTerm<Q extends RDF.BaseQuad = RDF.Quad>(term: RDF.Term, quad
       }
     }
   }
-  const hash: string = sha1hex(quadSignatures.sort().join(''));
-  return [ grounded, hash ];
+  return [grounded, quadSignatures.sort()];
 }
 
 /**
@@ -468,7 +482,11 @@ export function termToSignature(term: RDF.Term, hashes: ITermHash, target: RDF.T
   if (term.equals(target)) {
     return '@self';
   } else if (term.termType === 'BlankNode') {
-    return hashes[termToString(term)] || '@blank';
+    if (hashes[termToString(term)]) {
+      return hashes[termToString(term)].join('')
+    } else {
+      return '@blank';
+    }
   } else if (term.termType === 'Quad') {
     return `<${quadToSignature(term, hashes, target)}>`;
   } else {
@@ -494,7 +512,7 @@ export function isTermGrounded(term: RDF.Term, hashes: ITermHash): boolean {
 }
 
 export interface ITermHash {
-  [term: string]: string;
+  [term: string]: string[];
 }
 
 export interface IFunction {
